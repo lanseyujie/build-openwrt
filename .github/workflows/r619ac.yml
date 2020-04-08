@@ -34,7 +34,7 @@ jobs:
 
       - name: Clone source code
         run: |
-          git clone -b dev-lean-lede https://github.com/Lienol/openwrt
+          git clone https://github.com/coolsnowwolf/lede.git openwrt
 
       - name: Update feeds
         run: |
