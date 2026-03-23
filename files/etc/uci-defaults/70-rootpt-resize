@@ -1,0 +1,28 @@
+#!/bin/sh
+
+FLAG_FILE="/etc/rootpt-resize"
+
+if [ -e "${FLAG_FILE}" ]; then
+	exit 1
+fi
+
+if ! type parted >/dev/null 2>&1 || ! lock -n /var/lock/root-resize; then
+	exit 1
+fi
+
+ROOT_BLK="$(readlink -f /sys/dev/block/"$(awk '$9=="/dev/root"{print $3}' /proc/self/mountinfo)")"
+
+if [ -z "${ROOT_BLK}" ]; then
+	exit 1
+fi
+
+ROOT_DISK="/dev/$(basename "${ROOT_BLK%/*}")"
+ROOT_PART="${ROOT_BLK##*[^0-9]}"
+
+parted -f -s "${ROOT_DISK}" resizepart "${ROOT_PART}" 100%
+mount_root done
+touch "${FLAG_FILE}"
+reboot
+
+# Keep this script for future sysupgrades.
+exit 1

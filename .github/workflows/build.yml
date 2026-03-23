@@ -1,0 +1,71 @@
+name: Build OpenWrt Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build.yml"
+      - "build-image.sh"
+      - "files/**"
+
+permissions:
+  contents: read
+
+env:
+  OPENWRT_VERSION: ""
+  TARGET: x86
+  SUBTARGET: 64
+  PROFILE: generic
+  EXTRA_IMAGE_NAME: custom
+  ROOTFS_PARTSIZE: 512
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            ca-certificates \
+            curl \
+            fakeroot \
+            file \
+            findutils \
+            gawk \
+            grep \
+            jq \
+            make \
+            patch \
+            perl \
+            python3 \
+            rsync \
+            sed \
+            tar \
+            unzip \
+            wget \
+            xz-utils \
+            zstd
+
+      - name: Build image
+        run: sh ./build-image.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: openwrt-${{ env.OPENWRT_VERSION != '' && env.OPENWRT_VERSION || 'latest' }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}-${{ env.EXTRA_IMAGE_NAME }}
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            out/*

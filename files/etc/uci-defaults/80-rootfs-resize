@@ -1,0 +1,34 @@
+#!/bin/sh
+
+PART_FLAG="/etc/rootpt-resize"
+FS_FLAG="/etc/rootfs-resize"
+
+if [ -e "${FS_FLAG}" ] || [ ! -e "${PART_FLAG}" ]; then
+	exit 1
+fi
+
+if ! type losetup >/dev/null 2>&1 || ! type resize2fs >/dev/null 2>&1 || ! lock -n /var/lock/root-resize; then
+	exit 1
+fi
+
+ROOT_BLK="$(readlink -f /sys/dev/block/"$(awk '$9=="/dev/root"{print $3}' /proc/self/mountinfo)")"
+
+if [ -z "${ROOT_BLK}" ]; then
+	exit 1
+fi
+
+ROOT_DEV="/dev/${ROOT_BLK##*/}"
+LOOP_DEV="$(awk '$5=="/overlay"{print $9}' /proc/self/mountinfo)"
+
+if [ -z "${LOOP_DEV}" ]; then
+	LOOP_DEV="$(losetup -f)"
+	losetup "${LOOP_DEV}" "${ROOT_DEV}"
+fi
+
+resize2fs -f "${LOOP_DEV}"
+mount_root done
+touch "${FS_FLAG}"
+reboot
+
+# Keep this script for future sysupgrades.
+exit 1

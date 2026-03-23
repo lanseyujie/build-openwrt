@@ -1,0 +1,5 @@
+.build-files/
+out/
+openwrt-imagebuilder-*.tar.zst
+openwrt-imagebuilder-*/
+sha256sums-*
