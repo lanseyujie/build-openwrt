@@ -57,8 +57,6 @@ luci-i18n-ddns-zh-cn
 ddns-scripts-cloudflare
 luci-app-cloudflared
 luci-i18n-cloudflared-zh-cn
-luci-app-nlbwmon
-luci-i18n-nlbwmon-zh-cn
 "}"
 
 ALL_PACKAGES="$(printf '%s %s' "$BASE_PACKAGES" "$DEFAULT_EXTRA_PACKAGES" | xargs)"
