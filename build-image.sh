@@ -7,6 +7,11 @@ SUBTARGET="${SUBTARGET:-64}"
 PROFILE="${PROFILE:-generic}"
 EXTRA_IMAGE_NAME="${EXTRA_IMAGE_NAME:-custom}"
 ROOTFS_PARTSIZE="${ROOTFS_PARTSIZE:-512}"
+# One entry per line: name|public-key URL|public-key filename|repository URL[,repository URL...]
+# Repository URLs may use @release@ (OpenWrt major version) and @arch@ (package architecture).
+APK_FEEDS="${APK_FEEDS:-
+passwall|https://sourceforge.net/projects/openwrt-passwall-build/files/apk.pub|passwall.pub|https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-@release@/@arch@/passwall_packages/packages.adb,https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-@release@/@arch@/passwall_luci/packages.adb,https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-@release@/@arch@/passwall2/packages.adb
+}"
 
 SOURCE_FILES_DIR="${SOURCE_FILES_DIR:-$PWD/files}"
 FILES_DIR="${FILES_DIR:-$PWD/.build-files}"
@@ -36,6 +41,12 @@ kmod-nft-nat
 "}"
 DEFAULT_EXTRA_PACKAGES="${DEFAULT_EXTRA_PACKAGES:-"
 block-mount
+cryptsetup
+kmod-dm
+kmod-fs-btrfs
+luci-app-passwall2
+podman
+syncthing
 luci-app-wol
 luci-i18n-wol-zh-cn
 luci-app-uhttpd
@@ -121,7 +132,7 @@ ensure_imagebuilder() {
 	if type sha256sum >/dev/null 2>&1; then
 		SHA_FILE="$PWD/sha256sums-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}"
 		download "$SHA_URL" "$SHA_FILE"
-		EXPECTED_LINE="$(grep "  ${IB_NAME}.tar.zst\$" "$SHA_FILE" || true)"
+		EXPECTED_LINE="$(awk -v filename="$IB_NAME.tar.zst" '$2 == filename || $2 == "*" filename { print; exit }' "$SHA_FILE" || true)"
 		if [ -n "$EXPECTED_LINE" ]; then
 			(
 				cd "$PWD"
@@ -146,9 +157,69 @@ prepare_files_dir() {
 	rsync -a "$SOURCE_FILES_DIR"/ "$FILES_DIR"/
 }
 
+add_apk_key() {
+	APK_KEY_URL="$1"
+	APK_KEY_NAME="$2"
+	APK_KEY_FILE="$FILES_DIR/etc/apk/keys/$APK_KEY_NAME"
+
+	mkdir -p "$IB_DIR/keys" "$(dirname "$APK_KEY_FILE")"
+	download "$APK_KEY_URL" "$IB_DIR/keys/$APK_KEY_NAME"
+	cp "$IB_DIR/keys/$APK_KEY_NAME" "$APK_KEY_FILE"
+}
+
+add_apk_repositories() {
+	APK_REPOSITORY_NAME="$1"
+	shift
+	APK_REPOSITORIES_FILE="$FILES_DIR/etc/apk/repositories.d/$APK_REPOSITORY_NAME.list"
+
+	mkdir -p "$(dirname "$APK_REPOSITORIES_FILE")"
+	printf '%s\n' "$@" > "$APK_REPOSITORIES_FILE"
+
+	for APK_REPOSITORY_URL in "$@"; do
+		grep -Fqx "$APK_REPOSITORY_URL" "$IB_DIR/repositories" ||
+			printf '%s\n' "$APK_REPOSITORY_URL" >> "$IB_DIR/repositories"
+	done
+}
+
+prepare_apk_feeds() {
+	if [ ! -f "$IB_DIR/repositories" ]; then
+		echo "Configured APK feeds require an APK-based OpenWrt ImageBuilder; OpenWrt ${OPENWRT_VERSION} does not provide one." >&2
+		exit 1
+	fi
+
+	APK_FEED_ARCH="$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"$/\1/p' "$IB_DIR/.config")"
+	if [ -z "$APK_FEED_ARCH" ]; then
+		echo "Could not determine the ImageBuilder package architecture for APK feeds." >&2
+		exit 1
+	fi
+
+	APK_FEED_RELEASE="${OPENWRT_VERSION%.*}"
+	printf '%s\n' "$APK_FEEDS" | while IFS='|' read -r APK_FEED_NAME APK_FEED_KEY_URL APK_FEED_KEY_NAME APK_FEED_URLS; do
+		[ -z "$APK_FEED_NAME" ] && continue
+		if [ -z "$APK_FEED_KEY_URL" ] || [ -z "$APK_FEED_KEY_NAME" ] || [ -z "$APK_FEED_URLS" ]; then
+			echo "Invalid APK_FEEDS entry for $APK_FEED_NAME." >&2
+			exit 1
+		fi
+
+		APK_FEED_URLS="$(printf '%s' "$APK_FEED_URLS" | sed \
+			-e "s|@release@|$APK_FEED_RELEASE|g" \
+			-e "s|@arch@|$APK_FEED_ARCH|g")"
+		APK_FEED_OLD_IFS="$IFS"
+		IFS=,
+		set -f
+		set -- $APK_FEED_URLS
+		set +f
+		IFS="$APK_FEED_OLD_IFS"
+
+		add_apk_key "$APK_FEED_KEY_URL" "$APK_FEED_KEY_NAME"
+		add_apk_repositories "$APK_FEED_NAME" "$@"
+	done
+}
+
 detect_openwrt_version
 ensure_imagebuilder
 prepare_files_dir
+prepare_apk_feeds
 
 echo "Using ImageBuilder: $IB_DIR"
 echo "Using source files: $SOURCE_FILES_DIR"
